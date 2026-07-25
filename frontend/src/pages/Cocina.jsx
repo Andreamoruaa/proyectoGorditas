@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import Topbar from '../components/Topbar'
 import styles from '../styles/cocina.module.css'
-import { Volume2, VolumeX, RefreshCw, CheckCircle } from 'lucide-react'
+import { Volume2, VolumeX, RefreshCw, CheckCircle, Clock } from 'lucide-react'
 
 // 1. MAPEADOR DE ESTACIONES SEGÚN LOS NOMBRES DE USUARIO CREADOS EN DATABASE.PY
 function estacionDeUsuario(nombre) {
@@ -75,11 +75,39 @@ export default function Cocina() {
     }
   }, [cargar, estacion, toast])
 
+  // Cambio de estado individual
   const cambiarEstado = async (ordenId, itemId, estado) => {
     try {
       await api.patch(`/ordenes/${ordenId}/item/${itemId}/estado`, { estado_cocina: estado })
       setItems(prev => prev.map(i => i.item_id === itemId ? { ...i, estado_cocina: estado } : i))
     } catch (e) { toast(e.message, 'error') }
+  }
+
+  // ✨ Cambio de estado masivo para toda la comanda
+  const cambiarEstadoOrdenCompleta = async (ordenId, nuevoEstado) => {
+    try {
+      await api.patch(`/ordenes/${ordenId}/estado-masivo`, {
+        estado_cocina: nuevoEstado,
+        estacion: estacion
+      })
+      
+      // Actualización reactiva local
+      setItems(prev => prev.map(item => {
+        if (item.orden_id === ordenId) {
+          return { ...item, estado_cocina: nuevoEstado }
+        }
+        return item
+      }))
+
+      // Si se marcan como "listo", se limpian de la pantalla de la estación
+      if (nuevoEstado === 'listo') {
+        setItems(prev => prev.filter(item => item.orden_id !== ordenId))
+      }
+
+      toast(`Comanda #${ordenId} marcada como: ${nuevoEstado.toUpperCase()}`, 'success')
+    } catch (e) {
+      toast(e.message || 'Error al actualizar comanda', 'error')
+    }
   }
 
   const porOrden = items.reduce((acc, item) => {
@@ -91,9 +119,8 @@ export default function Cocina() {
 
   const grupos = Object.values(porOrden)
 
-  // 2. TÍTULOS COINCIDENTES CON LAS ESTACIONES DE LA BASE DE DATOS
   const TITULO = {
-    gorditas: '🫓 Estación Gorditas',
+    gorditas: '🥟 Estación Gorditas',
     menudo: '🍲 Estación Menudo',
     antojitos: '🌮 Estación Antojitos',
   }
@@ -157,67 +184,100 @@ export default function Cocina() {
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gridAutoRows: 'min-content', gap: '1.75rem', justifyContent: 'center' }}>
-            {grupos.map(grupo => (
-              <div key={grupo.orden_id} className={styles['comanda-card']}>
-                
-                <div className={styles['comanda-header']}>
-                  <span className={styles['mesa-tag']}>🪑 {grupo.mesa}</span>
-                  <span style={{ color: 'var(--text2)', fontSize: 12 }}>Orden #{grupo.orden_id}</span>
-                </div>
-                
-                <div className={styles['comanda-body-scroll']}>
-                  {[...grupo.items]
-                    .sort((a, b) => (a.comensal || 1) - (b.comensal || 1))
-                    .map(item => (
-                      <div key={item.item_id} className={styles['comanda-item']}>
-                        <span className={styles.qty}>{item.cantidad}</span>
-                        
-                        <div className={styles.info}>
-                          <div className={styles.nombre}>
-                            {item.producto}
-                            {item.comensal && (
-                              <span className={styles['comensal-badge']}>
-                                C{item.comensal}
-                              </span>
-                            )}
-                          </div>
-                          {item.modificador && <div className={styles.mod}>▸ {item.modificador}</div>}
-                          {item.comentario && <div className={styles.comment}>💬 {item.comentario}</div>}
-                        </div>
-                        
-                        <div className={styles['comanda-actions']}>
-                          <span className={`${styles.badge} ${
-                            item.estado_cocina === 'listo' ? styles['badge-success'] :
-                            item.estado_cocina === 'preparando' ? styles['badge-warning'] : styles['badge-gray']
-                          }`}>
-                            {item.estado_cocina === 'listo' && '✓ '}
-                            {item.estado_cocina === 'preparando' && '⏱ '}
-                            {item.estado_cocina === 'pendiente' && '⭕ '}
-                            {capitalizar(item.estado_cocina)}
-                          </span>
+            {grupos.map(grupo => {
+              // Verificación de estados globales para los botones del encabezado
+              const hayPendientes = grupo.items.some(i => i.estado_cocina !== 'preparando' && i.estado_cocina !== 'listo')
+              const haySinTerminar = grupo.items.some(i => i.estado_cocina !== 'listo')
+
+              return (
+                <div key={grupo.orden_id} className={styles['comanda-card']}>
+                  
+                  {/* ✨ ENCABEZADO CON CONTROLES MASIVOS */}
+                  <div className={styles['comanda-header']} style={{ flexWrap: 'wrap', gap: '0.5rem', justifyContent: 'space-between' }}>
+                    <div>
+                      <span className={styles['mesa-tag']}>🪑 {grupo.mesa}</span>
+                      <span style={{ color: 'var(--text2)', fontSize: 12, marginLeft: '6px' }}>#{grupo.orden_id}</span>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.35rem' }}>
+                      {hayPendientes && (
+                        <button 
+                          className={`${styles.btn} ${styles['btn-primary']} ${styles['btn-sm']}`}
+                          onClick={() => cambiarEstadoOrdenCompleta(grupo.orden_id, 'preparando')}
+                          title="Marcar todos los ítems como preparando"
+                          style={{ padding: '2px 8px', fontSize: '0.75rem' }}
+                        >
+                          <Clock size={12} /> Preparando Todo
+                        </button>
+                      )}
+
+                      {haySinTerminar && (
+                        <button 
+                          className={`${styles.btn} ${styles['btn-success']} ${styles['btn-sm']}`}
+                          onClick={() => cambiarEstadoOrdenCompleta(grupo.orden_id, 'listo')}
+                          title="Marcar todos los ítems como listos"
+                          style={{ padding: '2px 8px', fontSize: '0.75rem' }}
+                        >
+                          <CheckCircle size={12} /> Listo Todo
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className={styles['comanda-body-scroll']}>
+                    {[...grupo.items]
+                      .sort((a, b) => (a.comensal || 1) - (b.comensal || 1))
+                      .map(item => (
+                        <div key={item.item_id} className={styles['comanda-item']}>
+                          <span className={styles.qty}>{item.cantidad}</span>
                           
-                          <div className={styles['btn-container']}>
-                            {item.estado_cocina === 'pendiente' && (
-                              <button className={`${styles.btn} ${styles['btn-primary']} ${styles['btn-sm']}`}
-                                onClick={() => cambiarEstado(item.orden_id, item.item_id, 'preparando')}>
-                                Preparando
-                              </button>
-                            )}
+                          <div className={styles.info}>
+                            <div className={styles.nombre}>
+                              {item.producto}
+                              {item.comensal && (
+                                <span className={styles['comensal-badge']}>
+                                  C{item.comensal}
+                                </span>
+                              )}
+                            </div>
+                            {item.modificador && <div className={styles.mod}>▸ {item.modificador}</div>}
+                            {item.comentario && <div className={styles.comment}>💬 {item.comentario}</div>}
+                          </div>
+                          
+                          <div className={styles['comanda-actions']}>
+                            <span className={`${styles.badge} ${
+                              item.estado_cocina === 'listo' ? styles['badge-success'] :
+                              item.estado_cocina === 'preparando' ? styles['badge-warning'] : styles['badge-gray']
+                            }`}>
+                              {item.estado_cocina === 'listo' && '✓ '}
+                              {item.estado_cocina === 'preparando' && '⏱ '}
+                              {item.estado_cocina === 'pendiente' && '⭕ '}
+                              {capitalizar(item.estado_cocina)}
+                            </span>
                             
-                            {item.estado_cocina === 'preparando' && (
-                              <button className={`${styles.btn} ${styles['btn-success']} ${styles['btn-sm']}`}
-                                onClick={() => cambiarEstado(item.orden_id, item.item_id, 'listo')}>
-                                <CheckCircle size={14} />
-                                Listo
-                              </button>
-                            )}
+                            <div className={styles['btn-container']}>
+                              {item.estado_cocina === 'pendiente' && (
+                                <button className={`${styles.btn} ${styles['btn-primary']} ${styles['btn-sm']}`}
+                                  onClick={() => cambiarEstado(item.orden_id, item.item_id, 'preparando')}>
+                                  Preparando
+                                </button>
+                              )}
+                              
+                              {item.estado_cocina === 'preparando' && (
+                                <button className={`${styles.btn} ${styles['btn-success']} ${styles['btn-sm']}`}
+                                  onClick={() => cambiarEstado(item.orden_id, item.item_id, 'listo')}>
+                                  <CheckCircle size={14} />
+                                  Listo
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>

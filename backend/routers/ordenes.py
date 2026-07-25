@@ -347,3 +347,43 @@ def ordenes_cocina(estacion: str, db: Session = Depends(get_db)):
             "comensal": item.comensal,
         })
     return result
+
+@router.patch("/{orden_id}/estado-masivo")
+async def actualizar_estado_masivo(orden_id: int, body: dict, db: Session = Depends(get_db)):
+    nuevo_estado = body.get("estado_cocina")
+    estacion = body.get("estacion") # Para actualizar solo los ítems de la estación activa
+    
+    if not nuevo_estado:
+        raise HTTPException(status_code=400, detail="Falta el estado_cocina")
+
+    query = db.query(OrdenItem).join(OrdenItem.producto).filter(
+        OrdenItem.orden_id == orden_id
+    )
+    
+    if estacion:
+        query = query.filter(Producto.estacion == estacion)
+        
+    items = query.all()
+    
+    if not items:
+        raise HTTPException(status_code=404, detail="No se encontraron ítems para esta orden")
+
+    mesa_nombre = items[0].orden.mesa.nombre if items[0].orden and items[0].orden.mesa else "?"
+
+    # Actualizar estados y notificar ítem por ítem a los meseros
+    for item in items:
+        item.estado_cocina = nuevo_estado
+        
+        # 📣 Emite el mismo evento que los meseros ya reconocen
+        await manager.notify_meseros({
+            "tipo": "item_listo",
+            "orden_id": orden_id,
+            "item_id": item.id,
+            "estado_cocina": nuevo_estado,
+            "producto": item.producto.nombre if item.producto else "",
+            "mesa": mesa_nombre,
+        })
+        
+    db.commit()
+
+    return {"ok": True, "items_actualizados": len(items)}
