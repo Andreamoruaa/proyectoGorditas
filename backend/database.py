@@ -124,7 +124,8 @@ def init_db():
             if t in prod_map:
                 modificadores.extend([
                     Modificador(producto_id=prod_map[t], nombre="Con carne", tipo="variante", precio_extra=0.0),
-                    Modificador(producto_id=prod_map[t], nombre="Sin carne", tipo="variante", precio_extra=0.0)
+                    Modificador(producto_id=prod_map[t], nombre="Sin carne", tipo="variante", precio_extra=0.0),
+                    Modificador(producto_id=prod_map[t], nombre="Con pata", tipo="variante", precio_extra=0.0)
                 ])
        
         # Modificador de Extra queso para los platillos de birria (excluyendo Kilos)
